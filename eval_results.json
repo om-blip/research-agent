@@ -1,0 +1,38 @@
+{
+  "faithfulness": 0.88,
+  "answer_relevancy": 0.86,
+  "num_examples": 5,
+  "passed": true,
+  "details": [
+    {
+      "question": "What is retrieval augmented generation?",
+      "answer": "Retrieval Augmented Generation (RAG) combines information retrieval with large language model generation, using retrieved documents as context to reduce hallucinations. RAG systems have three main com",
+      "faithfulness": 0.9,
+      "answer_relevancy": 0.9
+    },
+    {
+      "question": "How does vector similarity search work?",
+      "answer": "Vector similarity search works by converting text into high-dimensional numerical embeddings, then finding the nearest vectors using distance metrics like cosine similarity or dot product. This enable",
+      "faithfulness": 0.9,
+      "answer_relevancy": 0.9
+    },
+    {
+      "question": "What is the difference between chunking strategies in RAG?",
+      "answer": "There is no direct information about the difference between chunking strategies in RAG in the provided sources. However, we can infer that chunking strategies in RAG determine how documents are split ",
+      "faithfulness": 0.8,
+      "answer_relevancy": 0.7
+    },
+    {
+      "question": "What is MMR retrieval?",
+      "answer": "MMR retrieval is a strategy that balances relevance and diversity by selecting results that are both relevant to the query and different from already selected results. The lambda parameter controls th",
+      "faithfulness": 0.9,
+      "answer_relevancy": 0.9
+    },
+    {
+      "question": "Why use a vector database for AI applications?",
+      "answer": "Vector databases are used for AI applications because they efficiently store and search high-dimensional embedding vectors, enabling semantic search, recommendation engines, and image similarity searc",
+      "faithfulness": 0.9,
+      "answer_relevancy": 0.9
+    }
+  ]
+}

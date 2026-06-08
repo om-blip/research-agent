@@ -1,0 +1,22 @@
+[
+  {
+    "question": "What is retrieval augmented generation?",
+    "ground_truth": "RAG is a technique that combines information retrieval with language model generation. It retrieves relevant documents from a knowledge base and uses them as context when generating answers, reducing hallucinations."
+  },
+  {
+    "question": "How does vector similarity search work?",
+    "ground_truth": "Vector similarity search converts text into high-dimensional embeddings and finds the most similar vectors using distance metrics like cosine similarity. It enables semantic search beyond keyword matching."
+  },
+  {
+    "question": "What is the difference between chunking strategies in RAG?",
+    "ground_truth": "Different chunking strategies include fixed-size splitting, recursive character splitting, and semantic splitting. Recursive splitting respects natural language boundaries like paragraphs and sentences, producing more coherent chunks."
+  },
+  {
+    "question": "What is MMR retrieval?",
+    "ground_truth": "Maximal Marginal Relevance retrieval fetches a large candidate set then selects results that are both relevant to the query and diverse from each other, preventing redundant results."
+  },
+  {
+    "question": "Why use a vector database for AI applications?",
+    "ground_truth": "Vector databases efficiently store and search high-dimensional embeddings, enabling semantic similarity search at scale. They power RAG systems, recommendation engines, and semantic search applications."
+  }
+]
