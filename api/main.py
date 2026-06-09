@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import time
 import uuid
@@ -10,6 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.schemas import ResearchRequest, ResearchResponse, ResearchStatus
 from agents.orchestrator import research_graph
 from agents.state import ResearchState
+from monitoring.metrics import (
+    track_request, track_duration, track_chunks,
+    track_sources, ACTIVE_RUNS, get_metrics_response
+)
 from config import config
 
 logging.basicConfig(
@@ -18,19 +21,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# In-memory job store.
-# Why not a database? For a portfolio project this is fine.
-# In production you'd use Redis which gives you:
-# - Persistence across server restarts
-# - TTL-based automatic cleanup
-# - Works across multiple server instances
-# For now: dict is fast, simple, zero dependencies.
 job_store: dict = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Runs on startup and shutdown. Good place for DB connections etc."""
     logger.info("Research Agent API starting up")
     logger.info(f"Fast model: {config.FAST_MODEL}")
     logger.info(f"Smart model: {config.SMART_MODEL}")
@@ -41,16 +36,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Research Agent API",
     description=(
-        "Agentic RAG pipeline. Submit a topic, get a research report emailed to you. "
+        "Agentic RAG pipeline. Submit a topic, get a research report. "
         "Powered by Groq + LangGraph + ChromaDB."
     ),
     version="0.1.0",
     lifespan=lifespan,
 )
 
-# CORS allows your frontend (React, etc.) to call this API.
-# allow_origins=["*"] means any domain can call it.
-# In production restrict this to your frontend domain only.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -62,14 +54,18 @@ app.add_middleware(
 async def run_research_job(run_id: str, topic: str, email: str):
     """
     The actual research work. Runs in the background.
-    Updates job_store at each stage so status endpoint reflects progress.
+
+    Why background task and not just await in the endpoint?
+    Research takes 60-120 seconds. HTTP connections time out.
+    Background task returns immediately, user polls for status.
+    This is exactly how OpenAI batch API and Stripe webhooks work.
     """
     start_time = time.time()
+    ACTIVE_RUNS.inc()
 
     try:
         job_store[run_id]["status"] = "running"
 
-        # Build initial state for LangGraph
         initial_state: ResearchState = {
             "topic": topic,
             "recipient_email": email,
@@ -83,10 +79,7 @@ async def run_research_job(run_id: str, topic: str, email: str):
             "email_error": None,
         }
 
-        # Run the full LangGraph pipeline
-        # LangSmith automatically traces this if LANGCHAIN_TRACING_V2=true
         final_state = await research_graph.ainvoke(initial_state)
-
         duration = time.time() - start_time
 
         job_store[run_id].update({
@@ -99,16 +92,29 @@ async def run_research_job(run_id: str, topic: str, email: str):
             "duration_seconds": round(duration, 1),
         })
 
+        # Track metrics - these show up in /metrics endpoint
+        track_request("success")
+        track_duration(duration)
+        track_chunks(final_state.get("chunks_embedded", 0))
+        track_sources(len(final_state.get("raw_sources", [])))
+
         logger.info(f"Job {run_id} completed in {duration:.1f}s")
 
     except Exception as e:
         duration = time.time() - start_time
         logger.error(f"Job {run_id} failed: {e}", exc_info=True)
+
+        track_request("error")
+
         job_store[run_id].update({
             "status": "failed",
             "error": str(e),
             "duration_seconds": round(duration, 1),
         })
+
+    finally:
+        # Gauge always decremented whether job succeeded or failed
+        ACTIVE_RUNS.dec()
 
 
 @app.post("/research", response_model=ResearchResponse, status_code=202)
@@ -117,20 +123,13 @@ async def submit_research(
     background_tasks: BackgroundTasks,
 ) -> ResearchResponse:
     """
-    Submit a research job.
+    Submit a research job. Returns immediately with a run_id.
+    Poll GET /research/{run_id}/status for progress.
 
-    Returns HTTP 202 Accepted immediately with a run_id.
-    The research runs in the background.
-    Poll GET /research/{run_id}/status for updates.
-
-    HTTP 202 vs 200:
-    200 OK = "I finished the work"
-    202 Accepted = "I received your request and am working on it"
-    This distinction matters for API clients that check status codes.
+    HTTP 202 = "received and working on it" not "finished".
     """
     run_id = f"run_{uuid.uuid4().hex[:8]}"
 
-    # Create job record immediately
     job_store[run_id] = {
         "run_id": run_id,
         "topic": request.topic,
@@ -138,8 +137,6 @@ async def submit_research(
         "status": "queued",
     }
 
-    # Schedule actual work as background task
-    # FastAPI returns the response BEFORE the background task starts
     background_tasks.add_task(
         run_research_job,
         run_id=run_id,
@@ -185,8 +182,8 @@ async def get_status(run_id: str) -> ResearchStatus:
 async def health():
     """
     Health check endpoint.
-    Used by Docker, Kubernetes, and load balancers to know if the
-    service is alive. Should always return fast with no dependencies.
+    Docker, Kubernetes, and load balancers ping this to know
+    if the service is alive. Must always return fast.
     """
     active = len([j for j in job_store.values() if j.get("status") == "running"])
     return {
@@ -196,10 +193,28 @@ async def health():
     }
 
 
+@app.get("/metrics")
+async def metrics():
+    """
+    Prometheus metrics endpoint.
+    Prometheus scrapes this every 15 seconds and stores the values.
+    Grafana draws dashboards on top of the stored data.
+
+    What you see here:
+    - research_requests_total: total jobs by status
+    - research_duration_seconds: latency histogram
+    - research_active_runs: currently running jobs
+    - research_chunks_embedded: chunks per run histogram
+    - llm_calls_total: Groq API calls by model
+    """
+    return get_metrics_response()
+
+
 @app.get("/")
 async def root():
     return {
         "service": "Research Agent API",
         "docs": "/docs",
         "health": "/health",
+        "metrics": "/metrics",
     }
