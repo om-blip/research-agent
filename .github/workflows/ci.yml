@@ -1,0 +1,109 @@
+name: CI
+
+# Run on every push and every pull request to main
+# This means: every time you push code, tests run automatically
+# If tests fail, GitHub shows a red X on your commit
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ── Job 1: Unit Tests ─────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        # Downloads your repo code into the CI runner
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          # cache: "pip" means pip downloads are cached between runs
+          # First run: 2 minutes to install. Every run after: 20 seconds.
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: pytest tests/ -v
+        # -v = verbose, shows each test name passing/failing
+        # Exit code 0 = all passed = CI passes
+        # Exit code 1 = any failed = CI fails, blocks merge
+        env:
+          # Tests don't make real API calls so dummy keys are fine
+          GROQ_API_KEY: "dummy-key-for-tests"
+          CHROMA_PERSIST_DIR: "./chroma_test"
+
+  # ── Job 2: Eval Gate ──────────────────────────────────────────
+  eval-gate:
+    name: RAG Quality Gate
+    runs-on: ubuntu-latest
+    # Only run evals on pull requests, not every push to main
+    # Why? Evals cost API credits. We only want to pay when
+    # someone is proposing a change that could affect quality.
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run eval suite
+        run: python -m evals.eval_suite
+        # This exits with code 1 if scores drop below thresholds
+        # Code 1 = CI fails = PR cannot be merged
+        # This is the EVAL GATE - quality regressions are blocked
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CHROMA_PERSIST_DIR: "./chroma_eval"
+
+      - name: Upload eval results
+        uses: actions/upload-artifact@v4
+        if: always()
+        # if: always() means upload even if eval failed
+        # This lets you see the scores even on a failed PR
+        with:
+          name: eval-results
+          path: eval_results.json
+
+  # ── Job 3: Import Check ───────────────────────────────────────
+  import-check:
+    name: Import Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check all modules import cleanly
+        run: |
+          python -c "from rag.chunker import chunk_text; print('chunker ok')"
+          python -c "from rag.retriever import retrieve_for_prompt; print('retriever ok')"
+          python -c "from agents.state import ResearchState; print('state ok')"
+          python -c "from api.schemas import ResearchRequest; print('schemas ok')"
+          python -c "from monitoring.metrics import get_metrics_response; print('metrics ok')"
+        env:
+          GROQ_API_KEY: "dummy-key-for-tests"
+          CHROMA_PERSIST_DIR: "./chroma_test"
