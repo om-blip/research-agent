@@ -30,11 +30,25 @@ async def web_agent_node(state: dict) -> dict:
     logger.info(f"Web agent researching: '{question[:80]}'")
 
     # Step 1: Search for URLs about this question
-    try:
-        search_results = await search_web(question, max_results=PAGES_PER_QUESTION)
-    except Exception as e:
-        logger.error(f"Search failed: {e}")
-        return {"raw_sources": [], "errors": [f"Search failed: {e}"]}
+    # If the full question returns nothing, retry with first 6 words
+    # Long academic questions often return 0 results on DuckDuckGo
+    search_results = []
+    queries_to_try = [
+        question,
+        " ".join(question.split()[:6]),   # first 6 words
+        " ".join(question.split()[:4]),   # first 4 words
+    ]
+
+    for query in queries_to_try:
+        try:
+            search_results = await search_web(query, max_results=PAGES_PER_QUESTION)
+            if search_results:
+                logger.info(f"Search succeeded with query: '{query[:60]}'")
+                break
+            else:
+                logger.warning(f"No results for query: '{query[:60]}', trying shorter...")
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
 
     if not search_results:
         return {"raw_sources": [], "errors": [f"No results for: {question}"]}

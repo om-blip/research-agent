@@ -1,6 +1,7 @@
 import httpx
 from typing import List, Dict
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,10 @@ async def search_web(query: str, max_results: int = 5) -> List[Dict]:
         # DuckDuckGo HTML search - no API key, no library
         url = "https://html.duckduckgo.com/html/"
         params = {"q": query}
+
+        # Small delay prevents DDG from rate limiting us
+        # when multiple agents search simultaneously
+        await asyncio.sleep(1)
 
         async with httpx.AsyncClient(headers=headers, timeout=10) as client:
             response = await client.post(url, data=params)
